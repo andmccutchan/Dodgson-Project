@@ -1,43 +1,16 @@
 from time import perf_counter
 
-def is_condorcet_winner(candidate, voters, candidates):
-    for others in candidates:
-        if others == candidate:
-            continue
-        result = pairwise_compare(candidate , others, voters)
-        if result != candidate and result != 0:
-            return False
-    return True
+def pairwise_compare(candidateA, candidateB, voters, cache):
+    """
+    Compare candidateA vs candidateB in a given profile (voters).
+    Uses caching to avoid recomputation.
+    """
+    profile_key = profile_to_key(voters)
+    cache_key = (profile_key, candidateA, candidateB)
 
-def generate_swaps(voters):
-    swapped_voters = []
-    for voter, preferences in voters.items():
-        for i in range(len(preferences) - 1):
-            new_voters = {k: list(v) for k, v in voters.items()}
-            new_preference = new_voters[voter]
-            new_preference[i], new_preference[i+1] = new_preference[i+1], new_preference[i]
-            new_voters[voter] = new_preference
-            swapped_voters.append(new_voters)
-    return swapped_voters
+    if cache_key in cache:
+        return cache[cache_key]
 
-def dodgson_score(candidate, voters, candidates):
-    if is_condorcet_winner(candidate, voters, candidates):
-        return 0
-    
-    swaps = 0
-    current_profiles = [voters]
-    
-    while True:
-        swaps += 1
-        next_profiles = []
-        for profile in current_profiles:
-            for new_profile in generate_swaps(profile):
-                if is_condorcet_winner(candidate, new_profile, candidates):
-                    return swaps
-                next_profiles.append(new_profile)
-        current_profiles = next_profiles
-                  
-def pairwise_compare(candidateA, candidateB, voters):
     candidateA_wins = 0
     candidateB_wins = 0
     for preference in voters.values():
@@ -45,14 +18,76 @@ def pairwise_compare(candidateA, candidateB, voters):
             candidateA_wins += 1
         else:
             candidateB_wins += 1
+
     if candidateA_wins == candidateB_wins:
-        return 0
+        result = 0
     elif candidateA_wins > candidateB_wins:
-        return candidateA
-    else: 
-        return candidateB
-        
+        result = candidateA
+    else:
+        result = candidateB
+
+    cache[cache_key] = result
+    return result
+
+
+def is_condorcet_winner(candidate, voters, candidates, cache):
+    for other in candidates:
+        if other == candidate:
+            continue
+        result = pairwise_compare(candidate, other, voters, cache)
+        if result != candidate and result != 0:
+            return False
+    return True
+
+
+def generate_swaps(voters):
+    swapped_voters = []
+    for voter, preferences in voters.items():
+        for i in range(len(preferences) - 1):
+            new_voters = {k: list(v) for k, v in voters.items()}
+            new_preference = new_voters[voter]
+            # adjacent swap
+            new_preference[i], new_preference[i+1] = new_preference[i+1], new_preference[i]
+            new_voters[voter] = new_preference
+            swapped_voters.append(new_voters)
+    return swapped_voters
+
+
+def profile_to_key(voters):
+    """
+    Convert a profile (dict of voter -> preference list) into
+    a hashable, sorted tuple of tuples.
+    """
+    return tuple(sorted((v, tuple(p)) for v, p in voters.items()))
+
+
+def dodgson_score(candidate, voters, candidates):
+    cache = {}  # pairwise comparison cache
+    if is_condorcet_winner(candidate, voters, candidates, cache):
+        return 0
     
+    swaps = 0
+    current_profiles = [voters]
+    visited = {profile_to_key(voters)}  # track visited profiles
+    
+    while current_profiles:
+        swaps += 1
+        next_profiles = []
+        for profile in current_profiles:
+            for new_profile in generate_swaps(profile):
+                pk = profile_to_key(new_profile)
+                if pk in visited:
+                    continue
+                visited.add(pk)
+
+                if is_condorcet_winner(candidate, new_profile, candidates, cache):
+                    return swaps
+                next_profiles.append(new_profile)
+        current_profiles = next_profiles
+    
+    return float("inf")  # should not happen in valid elections
+
+
 def main():
     start_time = perf_counter()
     
@@ -75,7 +110,6 @@ def main():
 
         return candidates, voters
 
-
     filename = "election.txt" 
     candidates, voters = read_election_file(filename)
 
@@ -84,20 +118,6 @@ def main():
     for voter, ranking in voters.items():
         print(voter, ranking)
 
-
-    # pairwise_compare
-    # print("Test 1: Pairwise Compare")
-    # print("A vs B:", pairwise_compare("A", "B", voters)) 
-    # print("B vs C:", pairwise_compare("B", "C", voters))
-    # print("C vs A:", pairwise_compare("C", "A", voters)) 
-
-    # # generate_swaps
-    # print("\nTest 2: Generate Adjacent Swaps")
-    # swapped_profiles = generate_swaps(voters)
-    # for i, profile in enumerate(swapped_profiles, start=1):
-    #     print(f"Profile {i}: {profile}")
-
-    # Dodgson Scores
     print("\nTest 3: Dodgson Scores")
     scores = {c: dodgson_score(c, voters, candidates) for c in candidates}
     print("Dodgson scores:", scores)
@@ -106,8 +126,8 @@ def main():
     
     end_time = perf_counter()
     elapsed_time = end_time - start_time
-
     print(f"Program finished in {elapsed_time:.6f} seconds.")
-    
+
+
 if __name__ == "__main__":
     main()
